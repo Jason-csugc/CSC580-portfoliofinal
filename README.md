@@ -88,6 +88,15 @@ python alternate/main.py
 - Periodic discriminator accuracy reporting (baseline scripts)
 - Final training time summary
 
+<img width="612" height="611" alt="image" src="https://github.com/user-attachments/assets/3aae3acf-ad18-4b29-a938-47db18a3d344" />
+
+<img width="613" height="612" alt="image" src="https://github.com/user-attachments/assets/c1085824-72cd-40b5-a17f-a6d10a88464a" />
+
+<img width="612" height="608" alt="image" src="https://github.com/user-attachments/assets/c6e3b59f-7dc6-4658-928d-a9283f8435a6" />
+
+<img width="609" height="382" alt="image" src="https://github.com/user-attachments/assets/65a7659b-bbac-4647-b49e-0a55ccd3a4b8" />
+
+
 2. Artifacts:
 - Generated image snapshots such as gan_outputs/generated_epoch_250.jpg
 - Final generated sample grid such as gan_outputs/generated_final_epoch.jpg

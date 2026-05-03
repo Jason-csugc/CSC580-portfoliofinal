@@ -1,8 +1,14 @@
-"""TensorFlow/Keras GAN training script for a single CIFAR-10 class."""
+"""Train a basic CIFAR-10 GAN for one target class.
+
+This module defines GAN components and a training loop used to generate
+CIFAR-10-like samples for a selected class label.
+"""
 
 import os
+import logging
 import warnings
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
 
 # Disable oneDNN optimizations for consistent performance
@@ -18,7 +24,6 @@ warnings.filterwarnings(
     category=Warning,
 )
 
-
 import tensorflow as tf
 from keras import layers, Sequential, Model
 from keras.datasets import cifar10
@@ -32,14 +37,21 @@ LATENT_DIM = 100
 CLASS_ID = 8          # CIFAR-10 class 8 = ship
 EPOCHS = 15000
 BATCH_SIZE = 32
-DISPLAY_INTERVAL = 100
+DISPLAY_INTERVAL = 2500
 OUTPUT_DIR = "gan_outputs"
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
 def load_cifar10_class(class_id=8):
-    """Load CIFAR-10 and return normalized samples for a single class."""
+    """Load and normalize CIFAR-10 images for one class.
+
+    Args:
+        class_id: CIFAR-10 class index to keep.
+
+    Returns:
+        A NumPy array of images scaled to [-1, 1].
+    """
     (x_train, y_train), (_, _) = cifar10.load_data()
 
     x_train = x_train[y_train.flatten() == class_id]
@@ -51,7 +63,11 @@ def load_cifar10_class(class_id=8):
 
 
 def build_generator():
-    """Construct and return the GAN generator network."""
+    """Build the generator model for image synthesis.
+
+    Returns:
+        A Keras Sequential generator model.
+    """
     model = Sequential(name="Generator")
 
     model.add(layers.Input(shape=(LATENT_DIM,)))
@@ -75,7 +91,11 @@ def build_generator():
 
 
 def build_discriminator():
-    """Construct and return the GAN discriminator network."""
+    """Build the discriminator model for real/fake classification.
+
+    Returns:
+        A Keras Sequential discriminator model.
+    """
     model = Sequential(name="Discriminator")
 
     model.add(layers.Input(shape=IMAGE_SHAPE))
@@ -107,7 +127,13 @@ def build_discriminator():
 
 
 def save_generated_images(generator, epoch_label, filename):
-    """Generate a 4x4 image grid and save it to the output directory."""
+    """Generate and display a 4x4 grid of synthesized images.
+
+    Args:
+        generator: Generator model used for inference.
+        epoch_label: Label text shown in the figure title.
+        filename: Intended output file name in OUTPUT_DIR.
+    """
     rows, cols = 4, 4
 
     noise = np.random.normal(0, 1, (rows * cols, LATENT_DIM))
@@ -117,7 +143,7 @@ def save_generated_images(generator, epoch_label, filename):
     generated_images = 0.5 * generated_images + 0.5
     generated_images = np.clip(generated_images, 0, 1)
 
-    fig, axs = plt.subplots(rows, cols, figsize=(6, 6))
+    _, axs = plt.subplots(rows, cols, figsize=(6, 6))
     count = 0
 
     for i in range(rows):
@@ -130,14 +156,19 @@ def save_generated_images(generator, epoch_label, filename):
     plt.tight_layout()
 
     save_path = os.path.join(OUTPUT_DIR, filename)
-    plt.savefig(save_path, dpi=150, format="jpg")
+    # plt.savefig(save_path, dpi=150, format="jpg")
     plt.show()
+    plt.close()
 
     print(f"Saved image grid: {save_path}")
 
 
 def train_gan():
-    """Train the GAN and save generated images and loss visualizations."""
+    """Train the GAN and visualize periodic outputs and losses.
+
+    Runs adversarial training and displays image samples and loss curves.
+    """
+    print(matplotlib.get_backend())
     x_train = load_cifar10_class(CLASS_ID)
 
     generator = build_generator()
@@ -172,7 +203,7 @@ def train_gan():
         # -----------------------------
         # Train Discriminator
         # -----------------------------
-        # discriminator.trainable = True
+        discriminator.trainable = True
 
         index = np.random.randint(0, x_train.shape[0], BATCH_SIZE)
         real_images = x_train[index]
@@ -193,7 +224,7 @@ def train_gan():
         # -----------------------------
         # Train Generator
         # -----------------------------
-        # discriminator.trainable = False
+        discriminator.trainable = False
 
         noise = np.random.normal(0, 1, (BATCH_SIZE, LATENT_DIM))
         misleading_targets = np.ones((BATCH_SIZE, 1))
@@ -236,8 +267,9 @@ def train_gan():
     plt.tight_layout()
 
     loss_path = os.path.join(OUTPUT_DIR, "cifar10_gan_loss_curve.jpg")
-    plt.savefig(loss_path, dpi=150, format="jpg")
+    # plt.savefig(loss_path, dpi=150, format="jpg")
     plt.show()
+    plt.close()
 
     print(f"Saved loss curve: {loss_path}")
 

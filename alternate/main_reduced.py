@@ -33,12 +33,15 @@ import keras as ks
 np.random.seed(42)
 tf.random.set_seed(42)
 
+# -----------------------------
+# Parameters
+# -----------------------------
 IMAGE_SHAPE = (32, 32, 3)
 LATENT_DIM = 100
 CLASS_ID = 8         # CIFAR-10 class 8 = ship
 EPOCHS = 15000
 BATCH_SIZE = 64
-DISPLAY_INTERVAL = 1000
+DISPLAY_INTERVAL = 250
 OUTPUT_DIR = "gan_outputs"
 USE_SINGLE_CLASS = True  # Set to True to train on only one class, False to use all classes
 
@@ -52,10 +55,76 @@ def load_cifar10_data():
     if USE_SINGLE_CLASS:
         x_train = x_train[y_train.flatten() == CLASS_ID]
 
+    # Normalize to [-1, 1]
     x_train = x_train.astype("float32")
     x_train = (x_train / 127.5) - 1.0
 
     return x_train
+
+
+# def build_generator():
+    """Build the generator network that maps latent vectors to RGB images.
+
+    Returns:
+        A compiled-ready Keras Sequential generator model.
+    """
+    model = ks.Sequential(name="Generator")
+
+    model.add(ks.layers.Input(shape=(LATENT_DIM,)))
+
+    # Project latent vector into low-resolution feature map
+    model.add(ks.layers.Dense(4 * 4 * 512, use_bias=False))
+    model.add(ks.layers.BatchNormalization())
+    model.add(ks.layers.LeakyReLU(negative_slope=0.2))
+
+    model.add(ks.layers.Reshape((4, 4, 512)))
+
+    # 4x4 -> 8x8
+    model.add(ks.layers.Conv2DTranspose(
+        256,
+        kernel_size=4,
+        strides=2,
+        padding="same",
+        use_bias=False
+    ))
+    model.add(ks.layers.BatchNormalization())
+    model.add(ks.layers.LeakyReLU(negative_slope=0.2))
+    model.add(ks.layers.Dropout(0.3))
+
+    # 8x8 -> 16x16
+    model.add(ks.layers.Conv2DTranspose(
+        128,
+        kernel_size=4,
+        strides=2,
+        padding="same",
+        use_bias=False
+    ))
+    model.add(ks.layers.BatchNormalization())
+    model.add(ks.layers.LeakyReLU(negative_slope=0.2))
+    model.add(ks.layers.Dropout(0.3))
+
+    # 16x16 -> 32x32
+    model.add(ks.layers.Conv2DTranspose(
+        64,
+        kernel_size=4,
+        strides=2,
+        padding="same",
+        use_bias=False
+    ))
+    model.add(ks.layers.BatchNormalization())
+    model.add(ks.layers.LeakyReLU(negative_slope=0.2))
+    model.add(ks.layers.Dropout(0.3))
+
+    # Final RGB image output: 32x32x3
+    model.add(ks.layers.Conv2DTranspose(
+        3,
+        kernel_size=3,
+        strides=1,
+        padding="same",
+        activation="tanh"
+    ))
+
+    return model
 
 def build_generator():
     """Build a more stable generator using UpSampling2D + Conv2D."""
@@ -68,16 +137,19 @@ def build_generator():
     model.add(ks.layers.LeakyReLU(negative_slope=0.2))
     model.add(ks.layers.Reshape((4, 4, 512)))
 
+    # 4x4 -> 8x8
     model.add(ks.layers.UpSampling2D())
     model.add(ks.layers.Conv2D(256, kernel_size=3, padding="same", use_bias=False))
     model.add(ks.layers.BatchNormalization())
     model.add(ks.layers.LeakyReLU(negative_slope=0.2))
 
+    # 8x8 -> 16x16
     model.add(ks.layers.UpSampling2D())
     model.add(ks.layers.Conv2D(128, kernel_size=3, padding="same", use_bias=False))
     model.add(ks.layers.BatchNormalization())
     model.add(ks.layers.LeakyReLU(negative_slope=0.2))
 
+    # 16x16 -> 32x32
     model.add(ks.layers.UpSampling2D())
     model.add(ks.layers.Conv2D(64, kernel_size=3, padding="same", use_bias=False))
     model.add(ks.layers.BatchNormalization())
@@ -171,6 +243,7 @@ def create_training_gif(
 
     image_paths = glob.glob(os.path.join(image_folder, "generated_epoch_*.jpg"))
 
+    # Sort numerically by epoch number
     image_paths = sorted(
         image_paths,
         key=lambda path: int(
@@ -221,6 +294,7 @@ def train():
     print("--------------Discriminator Summary--------------")
     discriminator.summary()
 
+    # Discriminator learns slightly faster
     discriminator.trainable = True
     discriminator.compile(
         loss="binary_crossentropy",
@@ -228,6 +302,7 @@ def train():
         metrics=["accuracy"]
     )
 
+    # Freeze discriminator only inside combined GAN
     discriminator.trainable = False
 
     z = ks.layers.Input(shape=(LATENT_DIM,))
@@ -236,6 +311,7 @@ def train():
 
     combined_network = ks.Model(z, validity, name="Combined_GAN")
 
+    # Generator learns slightly slower to reduce mode collapse
     combined_network.compile(
         loss="binary_crossentropy",
         optimizer=ks.optimizers.Adam(learning_rate=0.00005, beta_1=0.5)
@@ -246,10 +322,16 @@ def train():
     d_losses = []
     g_losses = []
 
+    # Fixed noise lets you compare the same latent inputs over time
     fixed_noise = np.random.normal(0, 1, (16, LATENT_DIM))
 
     for epoch in range(1, EPOCHS + 1):
+
+        # -------------------------
+        # Train Discriminator
+        # -------------------------
         discriminator.trainable = True
+
         for _ in range(3):
             idx = np.random.randint(0, x_train.shape[0], BATCH_SIZE)
             real_images = x_train[idx]
@@ -257,12 +339,14 @@ def train():
             noise = np.random.normal(0, 1, (BATCH_SIZE, LATENT_DIM))
             fake_images = generator.predict(noise, verbose=0)
 
+            # Add small input noise to stabilize discriminator training
             real_images_noisy = real_images + 0.02 * np.random.normal(0, 1, real_images.shape)
             fake_images_noisy = fake_images + 0.02 * np.random.normal(0, 1, fake_images.shape)
 
             real_images_noisy = np.clip(real_images_noisy, -1, 1)
             fake_images_noisy = np.clip(fake_images_noisy, -1, 1)
 
+            # Smooth only real labels; keep fake labels exactly zero
             valid = np.ones((BATCH_SIZE, 1)) * 0.9
             fake = np.zeros((BATCH_SIZE, 1))
 
@@ -270,10 +354,14 @@ def train():
             disc_loss_fake = discriminator.train_on_batch(fake_images_noisy, fake)
             d_loss = 0.5 * np.add(disc_loss_real, disc_loss_fake)
 
+        # -------------------------
+        # Train Generator
+        # -------------------------
         discriminator.trainable = False
 
         noise = np.random.normal(0, 1, (BATCH_SIZE, LATENT_DIM))
 
+        # Slightly smoothed generator target
         misleading_targets = np.ones((BATCH_SIZE, 1)) * 0.9
 
         g_loss = combined_network.train_on_batch(noise, misleading_targets)
@@ -312,6 +400,7 @@ def train():
                 fixed_noise
             )
 
+    # Plot loss curves
     plt.figure(figsize=(8, 5))
     plt.plot(d_losses, label="Discriminator Loss")
     plt.plot(g_losses, label="Generator Loss")

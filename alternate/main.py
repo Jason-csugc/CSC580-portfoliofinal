@@ -1,61 +1,72 @@
-"""
-TensorFlow 2 / Keras GAN for CIFAR-10
+"""Train a CIFAR-10 GAN and export generated image outputs.
 
-Generates CIFAR-10-style images for one selected class.
-Saves:
-    generated_epoch_1.png
-    generated_final_epoch.png
+This module contains model definitions and the training routine for
+class-specific GAN image generation.
 """
 
 import os
+import warnings
 import numpy as np
 import matplotlib.pyplot as plt
-import tensorflow as tf
-from tensorflow.keras import layers, Model, Sequential
-from tensorflow.keras.datasets import cifar10
-from tensorflow.keras.optimizers import Adam
 
-# -----------------------------
-# Reproducibility
-# -----------------------------
+# Disable oneDNN optimizations for consistent performance
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+# Suppress TensorFlow logging (0=DEBUG, 1=INFO, 2=WARNING, 3=ERROR)
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+# logging.getLogger('tensorflow').setLevel(logging.ERROR)
+
+# Ignore NumPy 2.4 deprecation warning triggered by CIFAR-10 pickle loading.
+warnings.filterwarnings(
+    "ignore",
+    message=r".*align should be passed as Python or NumPy boolean.*",
+    category=Warning,
+)
+
+
+import tensorflow as tf
+from keras import layers, Sequential, Model
+from keras.datasets import cifar10
+from keras.optimizers import Adam
+
 np.random.seed(42)
 tf.random.set_seed(42)
 
-# -----------------------------
-# Parameters
-# -----------------------------
 IMAGE_SHAPE = (32, 32, 3)
 LATENT_DIM = 100
 CLASS_ID = 8          # CIFAR-10 class 8 = ship
 EPOCHS = 15000
 BATCH_SIZE = 32
-DISPLAY_INTERVAL = 2500
+DISPLAY_INTERVAL = 100
 OUTPUT_DIR = "gan_outputs"
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
-# -----------------------------
-# Load and prepare CIFAR-10 data
-# -----------------------------
 def load_cifar10_class(class_id=8):
-    """Load CIFAR-10 and return normalized samples for a single class."""
+    """Load and normalize CIFAR-10 images for one class.
+
+    Args:
+        class_id: CIFAR-10 class index to keep.
+
+    Returns:
+        A NumPy array of selected images scaled to [-1, 1].
+    """
     (x_train, y_train), (_, _) = cifar10.load_data()
 
-    # Select one class only
     x_train = x_train[y_train.flatten() == class_id]
 
-    # Normalize images from [0, 255] to [-1, 1]
+    # Normalize from [0, 255] to [-1, 1]
     x_train = (x_train.astype("float32") / 127.5) - 1.0
 
     return x_train
 
 
-# -----------------------------
-# Build Generator
-# -----------------------------
 def build_generator():
-    """Construct and return the GAN generator network."""
+    """Build the generator network used to synthesize images.
+
+    Returns:
+        A Keras Sequential generator model.
+    """
     model = Sequential(name="Generator")
 
     model.add(layers.Input(shape=(LATENT_DIM,)))
@@ -78,11 +89,12 @@ def build_generator():
     return model
 
 
-# -----------------------------
-# Build Discriminator
-# -----------------------------
 def build_discriminator():
-    """Construct and return the GAN discriminator network."""
+    """Build the discriminator network used for real/fake scoring.
+
+    Returns:
+        A Keras Sequential discriminator model.
+    """
     model = Sequential(name="Discriminator")
 
     model.add(layers.Input(shape=IMAGE_SHAPE))
@@ -113,20 +125,24 @@ def build_discriminator():
     return model
 
 
-# -----------------------------
-# Save generated image grid
-# -----------------------------
 def save_generated_images(generator, epoch_label, filename):
-    """Generate a 4x4 image grid and save it to the output directory."""
+    """Generate and save a 4x4 grid of synthetic samples.
+
+    Args:
+        generator: Generator model used for inference.
+        epoch_label: Label text used in the figure title.
+        filename: Output file name written to OUTPUT_DIR.
+    """
     rows, cols = 4, 4
+
     noise = np.random.normal(0, 1, (rows * cols, LATENT_DIM))
     generated_images = generator.predict(noise, verbose=0)
 
-    # Rescale from [-1, 1] to [0, 1]
+    # Convert from [-1, 1] back to [0, 1]
     generated_images = 0.5 * generated_images + 0.5
     generated_images = np.clip(generated_images, 0, 1)
 
-    fig, axs = plt.subplots(rows, cols, figsize=(6, 6))
+    _, axs = plt.subplots(rows, cols, figsize=(6, 6))
     count = 0
 
     for i in range(rows):
@@ -135,34 +151,35 @@ def save_generated_images(generator, epoch_label, filename):
             axs[i, j].axis("off")
             count += 1
 
-    plt.suptitle(f"Generated Images - {epoch_label}")
+    plt.suptitle(f"Generated CIFAR-10 Images - {epoch_label}")
     plt.tight_layout()
 
     save_path = os.path.join(OUTPUT_DIR, filename)
-    plt.savefig(save_path, dpi=150)
+    plt.savefig(save_path, dpi=150, format="jpg")
     plt.show()
-    plt.close()
 
     print(f"Saved image grid: {save_path}")
 
 
-# -----------------------------
-# Train GAN
-# -----------------------------
-def train():
-    """Train the GAN on one CIFAR-10 class and save progress artifacts."""
+def train_gan():
+    """Train the GAN and save images and training loss visualization.
+
+    Runs adversarial optimization and writes final output artifacts.
+    """
     x_train = load_cifar10_class(CLASS_ID)
 
     generator = build_generator()
     discriminator = build_discriminator()
 
+    # Compile discriminator while trainable
+    discriminator.trainable = True
     discriminator.compile(
         loss="binary_crossentropy",
         optimizer=Adam(learning_rate=0.0002, beta_1=0.5),
         metrics=["accuracy"]
     )
 
-    # Combined GAN model
+    # Freeze discriminator only for combined GAN
     discriminator.trainable = False
 
     z = layers.Input(shape=(LATENT_DIM,))
@@ -172,7 +189,7 @@ def train():
     combined_network = Model(z, validity, name="Combined_GAN")
     combined_network.compile(
         loss="binary_crossentropy",
-        optimizer=Adam(learning_rate=0.0002, beta_1=0.5)
+        optimizer=Adam(learning_rate=0.00005, beta_1=0.5)
     )
 
     d_losses = []
@@ -180,78 +197,78 @@ def train():
 
     for epoch in range(1, EPOCHS + 1):
 
-        # -------------------------
+        # -----------------------------
         # Train Discriminator
-        # -------------------------
-        idx = np.random.randint(0, x_train.shape[0], BATCH_SIZE)
-        real_images = x_train[idx]
+        # -----------------------------
+        discriminator.trainable = True
+
+        index = np.random.randint(0, x_train.shape[0], BATCH_SIZE)
+        real_images = x_train[index]
 
         noise = np.random.normal(0, 1, (BATCH_SIZE, LATENT_DIM))
-        fake_images = generator.predict(noise, verbose=0)
+        generated_images = generator.predict(noise, verbose=0)
 
-        # Label smoothing
-        valid = np.ones((BATCH_SIZE, 1)) * 0.9
+        valid = np.ones((BATCH_SIZE, 1))
+        valid += 0.05 * np.random.random(valid.shape)
+
         fake = np.zeros((BATCH_SIZE, 1))
+        fake += 0.05 * np.random.random(fake.shape)
 
-        d_loss_real = discriminator.train_on_batch(real_images, valid)
-        d_loss_fake = discriminator.train_on_batch(fake_images, fake)
-        d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
+        disc_loss_real = discriminator.train_on_batch(real_images, valid)
+        disc_loss_fake = discriminator.train_on_batch(generated_images, fake)
+        disc_loss = 0.5 * np.add(disc_loss_real, disc_loss_fake)
 
-        # -------------------------
+        # -----------------------------
         # Train Generator
-        # -------------------------
-        noise = np.random.normal(0, 1, (BATCH_SIZE, LATENT_DIM))
+        # -----------------------------
+        discriminator.trainable = False
 
-        # Generator wants discriminator to classify fake images as real
+        noise = np.random.normal(0, 1, (BATCH_SIZE, LATENT_DIM))
         misleading_targets = np.ones((BATCH_SIZE, 1))
 
-        g_loss = combined_network.train_on_batch(noise, misleading_targets)
+        gen_loss = combined_network.train_on_batch(noise, misleading_targets)
 
-        d_losses.append(d_loss[0])
-        g_losses.append(g_loss)
+        d_losses.append(disc_loss[0])
+        g_losses.append(gen_loss)
 
-        # Save first epoch images
         if epoch == 1:
             save_generated_images(
                 generator,
                 "Epoch 1",
-                "generated_epoch_1.png"
+                "cifar10_epoch_1.jpg"
             )
 
-        # Display progress
         if epoch % DISPLAY_INTERVAL == 0:
             print(
                 f"Epoch {epoch}/{EPOCHS} "
-                f"| D Loss: {d_loss[0]:.4f} "
-                f"| D Accuracy: {d_loss[1] * 100:.2f}% "
-                f"| G Loss: {g_loss:.4f}"
+                f"| D Loss: {disc_loss[0]:.4f} "
+                f"| D Accuracy: {disc_loss[1] * 100:.2f}% "
+                f"| G Loss: {gen_loss:.4f}"
             )
 
-        # Save final epoch images
         if epoch == EPOCHS:
             save_generated_images(
                 generator,
                 f"Final Epoch {EPOCHS}",
-                "generated_final_epoch.png"
+                "cifar10_final_epoch.jpg"
             )
 
-    # Plot loss curves
+    # Save loss curve as JPG
     plt.figure(figsize=(8, 5))
     plt.plot(d_losses, label="Discriminator Loss")
     plt.plot(g_losses, label="Generator Loss")
-    plt.title("GAN Training Loss")
+    plt.title("CIFAR-10 GAN Training Loss")
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
     plt.legend()
     plt.tight_layout()
 
-    loss_path = os.path.join(OUTPUT_DIR, "gan_loss_curve.png")
-    plt.savefig(loss_path, dpi=150)
+    loss_path = os.path.join(OUTPUT_DIR, "cifar10_gan_loss_curve.jpg")
+    plt.savefig(loss_path, dpi=150, format="jpg")
     plt.show()
-    plt.close()
 
     print(f"Saved loss curve: {loss_path}")
 
 
 if __name__ == "__main__":
-    train()
+    train_gan()
